@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter, NullLocator
 import pandas as pd
 import streamlit as st
 
@@ -46,6 +47,9 @@ def setup_korean_font() -> None:
     plt.rcParams["axes.grid"] = True
     plt.rcParams["grid.alpha"] = 0.25
     plt.rcParams["axes.edgecolor"] = "#cccccc"
+    # 축 눈금에 mathtext 를 쓰지 않는다 (최신 matplotlib + 한글 폰트 조합에서 파싱 오류 방지)
+    plt.rcParams["axes.formatter.use_mathtext"] = False
+    plt.rcParams["mathtext.default"] = "regular"
 
 
 setup_korean_font()
@@ -80,9 +84,18 @@ def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
 
 
 def make_axes(height: float = 4.2):
-    fig, ax = plt.subplots(figsize=(12, height))
-    fig.tight_layout()
-    return fig, ax
+    return plt.subplots(figsize=(12, height))
+
+
+def draw_chart(builder, message: str) -> None:
+    """차트 하나를 그려 화면에 올린다. 실패해도 나머지 화면은 계속 보여 준다."""
+    try:
+        fig = builder()
+        st.pyplot(fig)
+    except Exception as exc:  # noqa: BLE001
+        st.warning(f"{message} ({exc})")
+    finally:
+        plt.close("all")
 
 
 # --------------------------------------------------------------------------
@@ -233,39 +246,52 @@ c8.metric("샤프 지수", f"{s['sharpe']:.2f}", f"B&H {bm['sharpe']:.2f}")
 # 차트 1: 누적 자산 vs 단순보유 (로그)
 # --------------------------------------------------------------------------
 st.subheader("📈 전략 누적 자산 vs 단순보유 (B&H)")
-fig, ax = make_axes(4.6)
-ax.plot(s["equity"].index, s["equity"].values, color="#1f6feb", lw=1.6,
-        label=f"변동성 돌파 (K={k:.2f})")
-ax.plot(bm["underwater"].index, result.benchmark.values, color="#9aa0a6", lw=1.1,
-        label=f"{ticker_name} 단순보유")
-ax.set_yscale("log")
-ax.set_ylabel("평가 자산 (원, 로그 스케일)")
-ax.xaxis.set_major_locator(mdates.YearLocator(2))
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-ax.legend(loc="upper left")
-ax.set_title(f"{ticker_name} 누적 자산 비교 ({period})", fontsize=12)
-fig.tight_layout()
-st.pyplot(fig)
-plt.close(fig)
+
+
+def chart_equity():
+    fig, ax = make_axes(4.6)
+    ax.plot(s["equity"].index, s["equity"].values, color="#1f6feb", lw=1.6,
+            label=f"변동성 돌파 (K={k:.2f})")
+    ax.plot(result.benchmark.index, result.benchmark.values, color="#9aa0a6", lw=1.1,
+            label=f"{ticker_name} 단순보유")
+    ax.set_yscale("log")
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    ax.yaxis.set_minor_locator(NullLocator())
+    ax.set_ylabel("평가 자산 (원, 로그 스케일)")
+    ax.xaxis.set_major_locator(mdates.YearLocator(2))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.legend(loc="upper left")
+    ax.set_title(f"{ticker_name} 누적 자산 비교 ({period})", fontsize=12)
+    fig.subplots_adjust(left=0.11, right=0.98, top=0.90, bottom=0.12)
+    return fig
+
+
+draw_chart(chart_equity, "누적 자산 차트를 그리지 못했습니다.")
 
 # --------------------------------------------------------------------------
 # 차트 2: 언더워터 (MDD)
 # --------------------------------------------------------------------------
 st.subheader("📉 낙폭(Underwater) 비교")
-fig, ax = make_axes(3.2)
-ax.fill_between(s["underwater"].index, s["underwater"].values * 100, 0,
-                color="#1f6feb", alpha=0.35, label="변동성 돌파")
-ax.plot(s["underwater"].index, s["underwater"].values * 100, color="#1f6feb", lw=1.0)
-ax.plot(bm["underwater"].index, bm["underwater"].values * 100, color="#e8710a",
-        lw=1.0, label="단순보유")
-ax.set_ylabel("고점 대비 낙폭 (%)")
-ax.xaxis.set_major_locator(mdates.YearLocator(2))
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-ax.legend(loc="lower left")
-ax.set_title(f"최대 낙폭: 전략 {s['mdd']*100:.2f}% vs 단순보유 {bm['mdd']*100:.2f}%", fontsize=12)
-fig.tight_layout()
-st.pyplot(fig)
-plt.close(fig)
+
+
+def chart_underwater():
+    fig, ax = make_axes(3.2)
+    ax.fill_between(s["underwater"].index, s["underwater"].values * 100, 0,
+                    color="#1f6feb", alpha=0.35, label="변동성 돌파")
+    ax.plot(s["underwater"].index, s["underwater"].values * 100, color="#1f6feb", lw=1.0)
+    ax.plot(bm["underwater"].index, bm["underwater"].values * 100, color="#e8710a",
+            lw=1.0, label="단순보유")
+    ax.set_ylabel("고점 대비 낙폭 (%)")
+    ax.xaxis.set_major_locator(mdates.YearLocator(2))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.legend(loc="lower left")
+    ax.set_title(f"최대 낙폭: 전략 {s['mdd']*100:.2f}% vs 단순보유 {bm['mdd']*100:.2f}%",
+                 fontsize=12)
+    fig.subplots_adjust(left=0.11, right=0.98, top=0.90, bottom=0.14)
+    return fig
+
+
+draw_chart(chart_underwater, "낙폭 차트를 그리지 못했습니다.")
 
 # --------------------------------------------------------------------------
 # 차트 3: 연도별 수익률
@@ -279,20 +305,23 @@ if years:
 
     ys = [float(yearly.get(y, np.nan)) * 100 for y in years]
     bs = [float(bm_yearly.get(y, np.nan)) * 100 for y in years]
-    fig, ax = make_axes(3.6)
-    x = np.arange(len(years))
-    width = 0.4
-    ax.bar(x - width / 2, ys, width, color="#1f6feb", label="변동성 돌파")
-    ax.bar(x + width / 2, bs, width, color="#c4c7c5", label="단순보유")
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(y) for y in years], rotation=45, ha="right")
-    ax.set_ylabel("연간 수익률 (%)")
-    ax.axhline(0, color="#888888", lw=0.8)
-    ax.legend(loc="upper left")
-    ax.set_title("연도별 수익률 (전략 vs 단순보유)", fontsize=12)
-    fig.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+
+    def chart_yearly():
+        fig, ax = make_axes(3.6)
+        x = np.arange(len(years))
+        width = 0.4
+        ax.bar(x - width / 2, ys, width, color="#1f6feb", label="변동성 돌파")
+        ax.bar(x + width / 2, bs, width, color="#c4c7c5", label="단순보유")
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(y) for y in years], rotation=45, ha="right")
+        ax.set_ylabel("연간 수익률 (%)")
+        ax.axhline(0, color="#888888", lw=0.8)
+        ax.legend(loc="upper left")
+        ax.set_title("연도별 수익률 (전략 vs 단순보유)", fontsize=12)
+        fig.subplots_adjust(left=0.08, right=0.98, top=0.90, bottom=0.20)
+        return fig
+
+    draw_chart(chart_yearly, "연도별 수익률 차트를 그리지 못했습니다.")
 
     yearly_table = pd.DataFrame({
         "연도": years,
